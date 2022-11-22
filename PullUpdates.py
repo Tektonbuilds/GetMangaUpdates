@@ -1,4 +1,5 @@
 import json 
+import re
 
 from selenium import webdriver
 from selenium.webdriver.common.by import By
@@ -33,26 +34,58 @@ def get_chrome_driver(headless=False):
     browser.set_page_load_timeout(20)
     return browser 
 
+def get_chapter_from_web_text(web_text):
+    split_string = re.split(':| |\n',web_text)
+    for index, word in enumerate(split_string):
+        #print (word)
+        if word.lower() == "chapter" and index < len(split_string):
+            #print(split_string[index], split_string[index+1])
+            chapter_num = split_string[index+1]
+            if chapter_num.isdigit():
+                return int(chapter_num)
+            else:
+                return float(chapter_num)
+    return -1
+
 
 chromeDriver = get_chrome_driver(headless=True)
 
-chromeDriver.get("https://onepiecechapters.com/mangas/13/chainsaw-man")
   
-# printing the content of entire page
-all_list_elements = chromeDriver.find_elements(By.TAG_NAME,'a')
-#print (all_list_elements)
-
-for element in all_list_elements:
-    lowered_text = element.text.lower()
-    if lowered_text.__contains__('chapter'):
-        print("==================================================")
-        link = element.get_attribute('href')
-        print(element.text)
-        if link is not None:
-            print(link)
+# get all anchor elements
 
 def get_latest_chapter(url):
-    return 10
+    chromeDriver.get(url)
+    chromeDriver.refresh()
+    chromeDriver.implicitly_wait(5)
+    all_anchor_elements = chromeDriver.find_elements(By.TAG_NAME,'a')
+
+    # find the latest chapters among the first 4 anchor elements that contain chapter in its text
+    max_chapter = 0
+    max_chapter_link = "N/A"
+    count = 0
+    for element in all_anchor_elements:
+        lowered_text = element.text.lower()
+        if lowered_text.__contains__('chapter') and count < 2:
+            if element.text is not None: 
+                chapter = get_chapter_from_web_text(element.text)
+                if (chapter > max_chapter):
+                    max_chapter = chapter
+                    max_chapter_link = element.get_attribute('href')
+            count += 1
+    print ("============== ",max_chapter, max_chapter_link)
+    return (max_chapter, max_chapter_link)
+
+def get_all_chapters(url):
+    
+    chromeDriver.get(url)
+    all_anchor_elements = chromeDriver.find_elements(By.TAG_NAME,'a')
+
+    for element in all_anchor_elements:
+        lowered_text = element.text.lower()
+        if lowered_text.__contains__('chapter'):
+            print(element.get_attribute("class"))
+            print(element.get_attribute('outerHTML'))
+
 
 update_file = open('update.json')
 
@@ -61,17 +94,28 @@ update_data = json.load(update_file)
 
 for comic in update_data:
     comic_url = update_data[comic]['url']
-    latest_chapter = get_latest_chapter(comic_url)
-    # if the current chapter is older
-    if update_data[comic].get('latest chapter') is not None and update_data[comic]['latest chapter'] < latest_chapter:
-       update_data[comic]['latest chapter'] = latest_chapter
-    else:
-        update_data[comic]['latest chapter'] = latest_chapter
+    print ("Getting latest chapter for ",comic)
+    latest_chapter, chapter_link = get_latest_chapter(comic_url)
+    
+    # if the json file doesn't have a latest chapter, set to 1
+    if update_data[comic].get('latest chapter') is None: 
+        update_data[comic]['latest chapter'] = 1
+        continue
+    # if the latest chapter is not newer than the current chapter
+    if update_data[comic]['latest chapter'] >= latest_chapter: continue
+    # if there is no link, continue
+    if chapter_link is None: continue
+
+    print ("Setting latest chapter to",latest_chapter,chapter_link)
+    update_data[comic]['latest chapter'] = latest_chapter
+    update_data[comic]['chapter link'] = chapter_link
+        
     
     #print(comic + " has url " + comic_url)
 
 # update the entire list with the latest chapter
 with open("update.json", "w") as data_file:
     json.dump(update_data, data_file, indent=2)
+
 # closing the driver
-#chromeDriver.close()
+chromeDriver.close()
